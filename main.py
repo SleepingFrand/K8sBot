@@ -1,5 +1,6 @@
-from kuberapi import *
+from telegramapi import bot, HANDLER
 
+if __name__ == '__main__':
+    bot.message_handler = HANDLER
 
-pods = get_namespased_items('longhorn-system', 'pod')
-print(print_pods_status(get_node())) 
+    bot.polling()

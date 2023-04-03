@@ -6,6 +6,7 @@ config.load_kube_config(KUBER_CONFIG)
  # Создание объекта API
 v1 = client.CoreV1Api()
 appv1 = client.AppsV1Api()
+extv1 = client.ApiextensionsV1Api()
 
 '''
 ConfigMap - структура для хранения конфигурационных данных.
@@ -89,14 +90,14 @@ class kubernetes.client.V1Event(
 )
 '''
 
-def get_namespaces() -> dict:
+def get_namespaces():
     return v1.list_namespace()
 
 def get_node() -> client.V1NodeList:
     return v1.list_node()
 
 def print_namespase_list() -> str:
-    return 'namespaces:\n' + '\n'.join(get_namespace_list())
+    return 'namespaces:\n' + '\n'.join(get_name(i) for i in get_namespaces().items)
 
 def get_namespased_items(namespace='default', v1type='pod'):
     return {'pod':v1.list_namespaced_pod(namespace),
@@ -122,22 +123,79 @@ def get_name(item=None) -> str:
         try:
             return item.metadata.name
         except Exception as e:
-            print('Ошибка: ' + e)
+            print('Ошибка: %s\n' % e)
     return ''
 
-def print_pods_status(pods=None) -> str:
-    if pods != None:
-        if type(pods) in [client.V1PodList, client.V1NodeList, client.V1DeploymentList]:
-            pods = pods.items
-        elif type(pods) != dict:
+def print_items_status(items=None) -> str:
+    if items != None:
+        if type(items) in [client.V1PodList, client.V1NodeList, client.V1DeploymentList]:
+            items = items.items
+        elif type(items) != dict:
             return ''
-        if len(pods) == 0:
+        if len(items) == 0:
             return ''
-        if type(pods[0]) == client.V1Pod:
-            return '\n'.join(['Name: ' + i.metadata.name + ' Status: ' + i.status.phase for i in pods])
-        elif type(pods[0]) == client.V1Deployment:
-            return '\n'.join(['Name: ' + i.metadata.name + ' Status: ' + f'{i.status.replicas}/{i.status.ready_replicas}' for i in pods])
-        elif type(pods[0]) == client.V1Node:
-            return '\n'.join([f"Name: {i.metadata.name} Status: {'Reday' if i.status.conditions[-1].status else 'Not Ready'}" for i in pods])
+        if type(items[0]) == client.V1Pod:
+            return '\n'.join([i.metadata.name + ' Status: ' + i.status.phase for i in items])
+        elif type(items[0]) == client.V1Deployment:
+            return '\n'.join([i.metadata.name + ' Status: ' + f'{i.status.replicas}/{i.status.ready_replicas}' for i in items])
+        elif type(items[0]) == client.V1Node:
+            return '\n'.join([f"{i.metadata.name} Status: {'Reday' if i.status.conditions[-1].status else 'Not Ready'}" for i in items])
+
 def get_metadata(item=None):
-    pass
+    if item != None:
+        try:
+            return item.metadata
+        except Exception as e:
+            print('Ошибка: %s\n' % e)
+
+def delete_pod(pod = None):
+    if pod != None:
+        try:
+            v1.delete_namespaced_pod(pod.metadata.name, pod.metadata.namespace)
+        except Exception as e:
+            print('Ошибка: %s\n' % e)
+
+def Schedule_node_mode(node = None, Schedule = False):
+    if node != None:
+        # Настройка Schedule
+        try:
+            v1.patch_node(node, {"spec": {"unschedulable": Schedule}})
+            print(f"{''if Schedule else 'No' }Schedule установлен на {node}")
+        except ApiException as e:
+            print('Ошибка: %s\n' % e)
+            
+def Drain_node(node = None):
+    if node != None:
+        try:
+            pods = v1.list_pod_for_all_namespaces(field_selector=f"spec.nodeName={node}").items
+            Schedule_node_mode(node, True)
+
+            # Удалите каждый под:
+            for pod in pods:
+                v1.delete_namespaced_pod(
+                    name=pod.metadata.name,
+                    namespace=pod.metadata.namespace,
+
+                    body=client.V1DeleteOptions())
+            print("Pod удалины из node " + node)
+        except Exception as e:
+            print('Ошибка: %s\n' % e)
+
+def get_logs_pod(pod = None, lines=10):
+    if type(pod) == client.V1Pod:
+        try:
+            return pod.metadata.name + ' ' + pod.metadata.namespace + '\n' + v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=pod.metadata.namespace, tail_lines=lines) 
+
+        except Exception as e:
+            return 'Ошибка в получении логов с ' + pod.metadata.name + ' ' + pod.metadata.namespace
+
+def get_logs_pods(pods = None, lines=10):
+    if type(pods) == client.V1PodList:
+        pods_items = pods.items
+        logs = []
+        for pod in pods_items:
+            logs.append(get_logs_pod(pod, lines))
+        return logs
+
+def get_pod_info(pod_name, namespace):
+    return v1.read_namespaced_pod(name=pod_name, namespace=namespace)
